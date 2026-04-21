@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class GameManager : MonoBehaviour
 {
@@ -18,6 +19,49 @@ public class GameManager : MonoBehaviour
     public TMPro.TextMeshProUGUI statusText; // Kéo cái Text hiển thị trạng thái vào đây
 
     private int selectedRowIndex = -1; // Để khóa người chơi chỉ bốc 1 hàng
+
+    [Header("Turn UI")]
+    public UnityEngine.UI.Image currentTurnAvatar; // Kéo cái Image dưới chữ "Lượt của" vào đây
+    public Sprite p1Sprite;    // Ảnh bạn vẽ Người 1
+    public Sprite p2Sprite;    // Ảnh bạn vẽ Người 2
+    public Sprite robotSprite; // Ảnh bạn vẽ Máy
+
+    bool isGameOver = false;
+
+    [Header("Menus")]
+    public GameObject pausePanel; // Dòng này cực kỳ quan trọng để Unity nhận diện Panel
+
+    void UpdateTurnUI()
+    {
+        if (GameData.isPvP)
+        {
+            // Chế độ Người vs Người
+            if (isPlayerTurn)
+            {
+                statusText.text = "LƯỢT NGƯỜI 1";
+                currentTurnAvatar.sprite = p1Sprite; // Hiện ảnh P1 bạn vẽ
+            }
+            else
+            {
+                statusText.text = "LƯỢT NGƯỜI 2";
+                currentTurnAvatar.sprite = p2Sprite; // Hiện ảnh P2 bạn vẽ
+            }
+        }
+        else
+        {
+            // Chế độ Người vs Máy
+            if (isPlayerTurn)
+            {
+                statusText.text = "LƯỢT CỦA BẠN";
+                currentTurnAvatar.sprite = p1Sprite;
+            }
+            else
+            {
+                statusText.text = "AI ĐANG SUY NGHĨ...";
+                currentTurnAvatar.sprite = robotSprite; // Hiện ảnh con Bot bạn vẽ
+            }
+        }
+    }
 
     void Start()
     {
@@ -92,36 +136,28 @@ public class GameManager : MonoBehaviour
     }
     public void ConfirmPick()
     {
-        if (rightPanel.childCount == 0) return;
+        if (rightPanel.childCount == 0 || isGameOver) return; // Nếu game xong rồi thì không cho bấm nữa
 
         foreach (Transform child in rightPanel) Destroy(child.gameObject);
         selectedRowIndex = -1;
 
-        CheckGameOver(); // Kiểm tra xem có ai vừa bốc que cuối không
-
-        // Đổi lượt
-        isPlayerTurn = !isPlayerTurn;
-
-        // KIỂM TRA CHẾ ĐỘ CHƠI
-        if (GameData.isPvP)
+        // 1. Kiểm tra thắng thua TRƯỚC
+        if (CheckGameOver())
         {
-            // Chế độ Người vs Người: Chỉ hiện chữ báo lượt, không gọi Bot
-            statusText.text = isPlayerTurn ? "LƯỢT NGƯỜI 1" : "LƯỢT NGƯỜI 2";
+            return; // DỪNG TẠI ĐÂY, không chạy xuống phần đổi lượt hay đổi chữ nữa
         }
-        else
+
+        // 2. Nếu chưa thắng thì mới đổi lượt và cập nhật UI lượt chơi
+        isPlayerTurn = !isPlayerTurn;
+        UpdateTurnUI();
+
+        // 3. Xử lý AI
+        if (!GameData.isPvP && !isPlayerTurn)
         {
-            // Chế độ Người vs Máy: Nếu đến lượt Máy thì mới gọi AI bốc
-            if (!isPlayerTurn)
-            {
-                statusText.text = "AI ĐANG SUY NGHĨ...";
-                ExecuteAITurn();
-            }
-            else
-            {
-                statusText.text = "LƯỢT CỦA BẠN";
-            }
+            ExecuteAITurn();
         }
     }
+
 
     public void ExecuteAITurn()
     {
@@ -197,32 +233,58 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
         ConfirmPick(); // Gọi hàm xác nhận để kết thúc lượt của Bot
     }
-    void CheckGameOver()
+    bool CheckGameOver()
     {
-        int totalMatches = 0;
-        foreach (Transform row in rows)
+        if (IsAllMatchesGone())
         {
-            totalMatches += row.childCount;
-        }
+            isGameOver = true; // Khóa game lại
+            statusText.color = Color.yellow;
 
-        // Nếu không còn que diêm nào trên bàn
-        if (totalMatches == 0)
-        {
-            if (isPlayerTurn)
+            if (GameData.isPvP)
             {
-                // Nếu bốc xong mà đến lượt Player (nghĩa là AI vừa bốc que cuối)
-                statusText.text = "AI BỐC QUE CUỐI - BẠN THẮNG!";
-                statusText.color = Color.green;
+                statusText.text = isPlayerTurn ? "NGƯỜI CHƠI 2 THẮNG!" : "NGƯỜI CHƠI 1 THẮNG!";
             }
             else
             {
-                // Nếu bốc xong mà đến lượt AI (nghĩa là Player vừa bốc que cuối)
-                statusText.text = "BẠN BỐC QUE CUỐI - AI THẮNG!";
-                statusText.color = Color.red;
+                statusText.text = isPlayerTurn ? "AI THẮNG CUỘC!" : "BẠN ĐÃ THẮNG AI!";
             }
-
-            Debug.Log("GAME OVER!");
-            // Bạn có thể thêm code để hiện nút "Chơi lại" ở đây
+            return true;
         }
+        return false;
+    }
+
+    // Hàm phụ để kiểm tra xem trên bàn còn diêm không
+    bool IsAllMatchesGone()
+    {
+        foreach (var row in rows)
+        {
+            if (row.childCount > 0) return false;
+        }
+        return true;
+    }
+    public void ResetGame()
+    {
+        // Load lại scene hiện tại để bắt đầu ván mới hoàn toàn
+        Time.timeScale = 1f; // Reset thời gian phòng trường hợp game đang dừng
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    // Hàm cho nút Menu (mở Panel hỏi)
+    public void OpenPauseMenu()
+    {
+        pausePanel.SetActive(true);
+        // Time.timeScale = 0f; // Dừng game nếu muốn
+    }
+
+    // Hàm quay về màn hình chính (dùng cho nút trong Panel)
+    public void GoToHome()
+    {
+        Time.timeScale = 1f;
+        SceneManager.LoadScene("MainMenu"); // Thay "MainMenu" bằng tên Scene menu của bạn
+    }
+    public void ClosePauseMenu()
+    {
+        pausePanel.SetActive(false); // Ẩn cái bảng đi
+        Time.timeScale = 1f;         // Cho game chạy tiếp (nếu nãy có dùng Time.timeScale = 0)
     }
 }
